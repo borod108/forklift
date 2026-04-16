@@ -41,9 +41,9 @@ type metricsManager struct {
 	opLatencyMetrics *k8smetrics.HistogramVec
 	opInFlight       *k8smetrics.Gauge
 	// Completion metrics scraped from populator pod /metrics (xcopy only)
-	copyDuration        *k8smetrics.GaugeVec
-	sourceDiskSize      *k8smetrics.GaugeVec
-	completionRecorded  map[types.UID]bool
+	copyDuration       *k8smetrics.GaugeVec
+	sourceDiskSize     *k8smetrics.GaugeVec
+	completionRecorded map[types.UID]bool
 }
 
 var metricBuckets = []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30, 60, 120, 300, 600}
