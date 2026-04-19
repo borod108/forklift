@@ -316,6 +316,11 @@ func (r *Validator) ChangeTrackingEnabled(vmRef ref.Ref) (bool, error) {
 	return true, nil
 }
 
+// NO-OP: RDM and independent disks are vSphere-specific concepts.
+func (r *Validator) RDMAndIndependentDiskConcerns(vmRef ref.Ref) (hasRDM bool, hasIndependent bool, err error) {
+	return
+}
+
 // KubeVirt CR representation.
 type KubeVirt struct {
 	*cnv.KubeVirt

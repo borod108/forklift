@@ -81,6 +81,8 @@ const (
 	UnsupportedOvaSource          = "UnsupportedOvaSource"
 	VMPowerStateUnsupported       = "VMPowerStateUnsupported"
 	VMMigrationTypeUnsupported    = "VMMigrationTypeUnsupported"
+	RDMDiskWarning                = "RDMDiskWarning"
+	IndependentDiskWarning        = "IndependentDiskWarning"
 )
 
 // Categories
@@ -654,6 +656,22 @@ func (r *Reconciler) validateVM(plan *api.Plan) error {
 		Message:  "VM has disks with invalid sizes.",
 		Items:    []string{},
 	}
+	rdmDiskWarning := libcnd.Condition{
+		Type:     RDMDiskWarning,
+		Status:   True,
+		Reason:   NotSupported,
+		Category: api.CategoryWarn,
+		Message:  "VM has RDM disks which are not supported with VDDK transfer. Enable copy-offload (XCOPY) in the storage mapping to migrate RDM disks.",
+		Items:    []string{},
+	}
+	independentDiskWarning := libcnd.Condition{
+		Type:     IndependentDiskWarning,
+		Status:   True,
+		Reason:   NotSupported,
+		Category: api.CategoryWarn,
+		Message:  "VM has independent disks which are not supported with VDDK transfer. Enable copy-offload (XCOPY) in the storage mapping to migrate independent disks, or change them to 'Dependent' mode in VMware.",
+		Items:    []string{},
+	}
 
 	var sharedDisksConditions []libcnd.Condition
 	setOf := map[string]bool{}
@@ -821,6 +839,17 @@ func (r *Reconciler) validateVM(plan *api.Plan) error {
 		}
 		if len(invalidSizes) > 0 {
 			invalidDiskSizes.Items = append(invalidDiskSizes.Items, ref.String())
+		}
+
+		hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(*ref)
+		if err != nil {
+			return err
+		}
+		if hasRDM {
+			rdmDiskWarning.Items = append(rdmDiskWarning.Items, ref.String())
+		}
+		if hasIndependent {
+			independentDiskWarning.Items = append(independentDiskWarning.Items, ref.String())
 		}
 
 		ok, msg, category, err := validator.SharedDisks(*ref, ctx.Destination.Client)
@@ -991,6 +1020,12 @@ func (r *Reconciler) validateVM(plan *api.Plan) error {
 	}
 	if len(invalidDiskSizes.Items) > 0 {
 		plan.Status.SetCondition(invalidDiskSizes)
+	}
+	if len(rdmDiskWarning.Items) > 0 {
+		plan.Status.SetCondition(rdmDiskWarning)
+	}
+	if len(independentDiskWarning.Items) > 0 {
+		plan.Status.SetCondition(independentDiskWarning)
 	}
 
 	return nil

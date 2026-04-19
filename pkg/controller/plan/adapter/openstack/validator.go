@@ -168,3 +168,8 @@ func (r *Validator) VMMigrationType(vmRef ref.Ref) (ok bool, err error) {
 	ok = true
 	return
 }
+
+// NO-OP: RDM and independent disks are vSphere-specific concepts.
+func (r *Validator) RDMAndIndependentDiskConcerns(vmRef ref.Ref) (hasRDM bool, hasIndependent bool, err error) {
+	return
+}

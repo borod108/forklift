@@ -12,6 +12,7 @@ import (
 	model "github.com/kubev2v/forklift/pkg/controller/provider/web/vsphere"
 	"github.com/kubev2v/forklift/pkg/controller/validation"
 	liberr "github.com/kubev2v/forklift/pkg/lib/error"
+	"github.com/kubev2v/forklift/pkg/settings"
 	"github.com/vmware/govmomi/vim25/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -414,5 +415,46 @@ func (r *Validator) PowerState(vmRef ref.Ref) (ok bool, err error) {
 
 func (r *Validator) VMMigrationType(vmRef ref.Ref) (ok bool, err error) {
 	ok = true
+	return
+}
+
+// copyOffloadActive returns true when copy-offload (XCOPY) is enabled
+// and configured for this plan's storage mappings.
+func (r *Validator) copyOffloadActive() bool {
+	if !settings.Settings.Features.CopyOffload || r.Plan.Spec.Warm {
+		return false
+	}
+	if r.Context.Map.Storage == nil {
+		return false
+	}
+	for _, m := range r.Context.Map.Storage.Spec.Map {
+		if m.OffloadPlugin != nil && m.OffloadPlugin.VSphereXcopyPluginConfig != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RDMAndIndependentDiskConcerns checks if a VM has RDM or independent disks.
+// When copy-offload is active, these disk types are supported so no concerns
+// are returned. Otherwise, both flags indicate that a Warning should be raised.
+func (r *Validator) RDMAndIndependentDiskConcerns(vmRef ref.Ref) (hasRDM bool, hasIndependent bool, err error) {
+	if r.copyOffloadActive() {
+		return
+	}
+	vm := &model.VM{}
+	err = r.Source.Inventory.Find(vm, vmRef)
+	if err != nil {
+		err = liberr.Wrap(err, "vm", vmRef.String())
+		return
+	}
+	for _, disk := range vm.Disks {
+		if disk.RDM {
+			hasRDM = true
+		}
+		if disk.Mode == "independent_persistent" || disk.Mode == "independent_nonpersistent" {
+			hasIndependent = true
+		}
+	}
 	return
 }

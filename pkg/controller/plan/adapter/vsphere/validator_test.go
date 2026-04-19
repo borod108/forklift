@@ -10,6 +10,7 @@ import (
 	"github.com/kubev2v/forklift/pkg/controller/provider/web"
 	"github.com/kubev2v/forklift/pkg/controller/provider/web/base"
 	model "github.com/kubev2v/forklift/pkg/controller/provider/web/vsphere"
+	"github.com/kubev2v/forklift/pkg/settings"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +45,37 @@ func (m *mockInventory) Find(resource interface{}, ref ref.Ref) error {
 		}
 		if ref.Name == "missing_from_invetory" {
 			return base.NotFoundError{}
+		}
+	case *model.VM:
+		switch ref.Name {
+		case "vm_with_rdm":
+			res.Disks = []vsphere.Disk{
+				{File: "disk1.vmdk", RDM: false},
+				{File: "disk2.vmdk", RDM: true},
+			}
+		case "vm_with_independent":
+			res.Disks = []vsphere.Disk{
+				{File: "disk1.vmdk", Mode: "persistent"},
+				{File: "disk2.vmdk", Mode: "independent_persistent"},
+			}
+		case "vm_with_independent_nonpersistent":
+			res.Disks = []vsphere.Disk{
+				{File: "disk1.vmdk", Mode: "independent_nonpersistent"},
+			}
+		case "vm_with_rdm_and_independent":
+			res.Disks = []vsphere.Disk{
+				{File: "disk1.vmdk", RDM: true},
+				{File: "disk2.vmdk", Mode: "independent_persistent"},
+			}
+		case "vm_normal":
+			res.Disks = []vsphere.Disk{
+				{File: "disk1.vmdk", Mode: "persistent"},
+				{File: "disk2.vmdk"},
+			}
+		case "missing_from_invetory":
+			return base.NotFoundError{}
+		default:
+			res.Disks = []vsphere.Disk{}
 		}
 	}
 	return nil
@@ -116,6 +148,103 @@ var _ = Describe("vsphere validation tests", func() {
 			Entry("when the vm doesn't have static ips, and the plan set with static ip, vm is non-windows", "not_windows_guest", true, false),
 			Entry("when the vm doesn't exist", "missing_from_invetory", true, true),
 		)
+	})
+
+	Describe("RDMAndIndependentDiskConcerns", func() {
+		var validator *Validator
+
+		createValidatorWithCopyOffload := func(copyOffload bool) *Validator {
+			p := createPlan()
+			storageMap := &v1beta1.StorageMap{
+				Spec: v1beta1.StorageMapSpec{
+					Map: []v1beta1.StoragePair{
+						{
+							Source: ref.Ref{ID: "ds-1"},
+						},
+					},
+				},
+			}
+			if copyOffload {
+				storageMap.Spec.Map[0].OffloadPlugin = &v1beta1.OffloadPlugin{
+					VSphereXcopyPluginConfig: &v1beta1.VSphereXcopyPluginConfig{},
+				}
+			}
+			ctx := plancontext.Context{
+				Plan:   p,
+				Source: plancontext.Source{Inventory: &mockInventory{}},
+			}
+			ctx.Map.Storage = storageMap
+			settings.Settings.Features.CopyOffload = copyOffload
+			return &Validator{Context: &ctx}
+		}
+
+		Context("without copy-offload", func() {
+			BeforeEach(func() {
+				validator = createValidatorWithCopyOffload(false)
+			})
+
+			It("should detect RDM disks", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_rdm"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeTrue())
+				Expect(hasIndependent).To(BeFalse())
+			})
+
+			It("should detect independent_persistent disks", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_independent"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeFalse())
+				Expect(hasIndependent).To(BeTrue())
+			})
+
+			It("should detect independent_nonpersistent disks", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_independent_nonpersistent"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeFalse())
+				Expect(hasIndependent).To(BeTrue())
+			})
+
+			It("should detect both RDM and independent disks", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_rdm_and_independent"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeTrue())
+				Expect(hasIndependent).To(BeTrue())
+			})
+
+			It("should report no concerns for normal disks", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_normal"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeFalse())
+				Expect(hasIndependent).To(BeFalse())
+			})
+		})
+
+		Context("with copy-offload active", func() {
+			BeforeEach(func() {
+				validator = createValidatorWithCopyOffload(true)
+			})
+
+			It("should suppress RDM disk concerns", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_rdm"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeFalse())
+				Expect(hasIndependent).To(BeFalse())
+			})
+
+			It("should suppress independent disk concerns", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_independent"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeFalse())
+				Expect(hasIndependent).To(BeFalse())
+			})
+
+			It("should suppress both RDM and independent disk concerns", func() {
+				hasRDM, hasIndependent, err := validator.RDMAndIndependentDiskConcerns(ref.Ref{Name: "vm_with_rdm_and_independent"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasRDM).To(BeFalse())
+				Expect(hasIndependent).To(BeFalse())
+			})
+		})
 	})
 })
 

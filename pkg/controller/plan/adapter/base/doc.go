@@ -165,6 +165,10 @@ type Validator interface {
 	UnSupportedDisks(vmRef ref.Ref) ([]string, error)
 	// Validate that the VM disks have valid sizes (> 0).
 	InvalidDiskSizes(vmRef ref.Ref) ([]string, error)
+	// Check for RDM and independent disks.
+	// Returns whether these disk types are present AND copy-offload is NOT active.
+	// When copy-offload is active, both return false (no concern needed).
+	RDMAndIndependentDiskConcerns(vmRef ref.Ref) (hasRDM bool, hasIndependent bool, err error)
 }
 
 // DestinationClient API.
